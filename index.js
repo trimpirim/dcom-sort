@@ -2,15 +2,28 @@ const dicom = require('dicomjs');
 const fs = require('fs');
 const path = require('path');
 const shell = require('shelljs');
+const readdirp = require('readdirp');
 
 const dir = './dcom';
 
+function files(dir = dir) {
+    return new Promise((resolve, reject) => {
+        readdirp({root: dir}, (file => {
+        }), (error, files) => {
+            if (error) {
+                reject(error);
+            }
+
+            resolve(files.files);
+        });
+    });  
+}
+
 function parse(file) {
     return new Promise((resolve, reject) => {
-        const path = `${dir}/${file}`;
-        dicom.parseFile(`${dir}/${file}`, (err, data) => {
+        dicom.parseFile(file.fullPath, (err, data) => {
             resolve(appendAdditional({
-                filePath: path,
+                filePath: file.fullPath,
                 file,
                 dataset: data.dataset
             }));
@@ -34,57 +47,60 @@ function appendAdditional(file) {
     }
 }
 
-fs.readdir(dir, async (err, files) => {
-    const promises = [];
+files(dir)
+    .then(async (files) => {
+        const promises = [];
 
-    files.filter(file => {
-        return path.extname(file) === '.dcm';
-    }).forEach(async file => {
-        promises.push(parse(file));
-    });
+        files.filter(file => {
+            return path.extname(file.name) === '.dcm';
+        }).forEach(async file => {
+            promises.push(parse(file));
+        });
 
-    const joinedPromise = Promise.all(promises);
+        const joinedPromise = Promise.all(promises);
 
-    try {
-        const result = await joinedPromise;
-        const sorted = result.sort((a, b) => {
-            if (a.additional.imageType.localeCompare(b.additional.imageType) === 0 ) {
-                if (a.additional.studyID === b.additional.studyID) {
-                    if (a.additional.seriesNumber === b.additional.seriesNumber) {
-                        if (a.additional.instanceNumber === b.additional.instanceNumber) {
-                            if (a.additional.sliceLocation === b.additional.sliceLocation) {
-                                return a.additional.acquisitionTime - b.additional.acquisitionTime;
+        try {
+            const result = await joinedPromise;
+            const sorted = result.sort((a, b) => {
+                if (a.additional.imageType.localeCompare(b.additional.imageType) === 0 ) {
+                    if (a.additional.studyID === b.additional.studyID) {
+                        if (a.additional.seriesNumber === b.additional.seriesNumber) {
+                            if (a.additional.instanceNumber === b.additional.instanceNumber) {
+                                if (a.additional.sliceLocation === b.additional.sliceLocation) {
+                                    return a.additional.acquisitionTime - b.additional.acquisitionTime;
+                                } else {
+                                    return a.additional.sliceLocation - b.additional.sliceLocation;
+                                }
                             } else {
-                                return a.additional.sliceLocation - b.additional.sliceLocation;
+                                return a.additional.instanceNumber - b.additional.instanceNumber;
                             }
                         } else {
-                            return a.additional.instanceNumber - b.additional.instanceNumber;
+                            return a.additional.seriesNumber - b.additional.seriesNumber
                         }
                     } else {
-                        return a.additional.seriesNumber - b.additional.seriesNumber
+                        return a.additional.studyID - b.additional.studyID;
                     }
                 } else {
-                    return a.additional.studyID - b.additional.studyID;
+                    return a.additional.imageType.localeCompare(b.additional.imageType);
                 }
-            } else {
-                return a.additional.imageType.localeCompare(b.additional.imageType);
-            }
-        });
+            });
 
-        const withLocalizers = sorted.filter(item => item.additional.imageType.toLowerCase().includes('localizer'));
-        const modified = [
-            ...sorted.filter((item) => !item.additional.imageType.toLowerCase().includes('localizer')),
-            ...withLocalizers
-        ];
+            const withLocalizers = sorted.filter(item => item.additional.imageType.toLowerCase().includes('localizer'));
+            const modified = [
+                ...sorted.filter((item) => !item.additional.imageType.toLowerCase().includes('localizer')),
+                ...withLocalizers
+            ];
 
-        shell.exec('rm -rf ./sorted && mkdir ./sorted')
+            shell.exec('rm -rf ./sorted && mkdir ./sorted')
 
-        modified.forEach((item, index) => {
-            delete item['dataset'];
+            modified.forEach((item, index) => {
+                delete item['dataset'];
 
-            shell.exec(`cp ${item.filePath} ./sorted/${index}.dcm`)
-        });
-    } catch (e) {
-        console.log("ERROR", e);
-    }
-});
+                shell.exec(`cp ${item.filePath} ./sorted/${index}.dcm`)
+            });
+        } catch (e) {
+            console.log("ERROR", e);
+        }
+    }).catch(error => {
+        console.log('error', e);
+    });

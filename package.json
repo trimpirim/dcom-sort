@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "dicomjs": "^0.1.0",
+    "readdirp": "^2.2.1",
     "shelljs": "^0.8.3"
   }
 }
